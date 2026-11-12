@@ -172,3 +172,205 @@ def test_partial_and_full_exit(paper_account):
         assert [fill.side for fill in fills] == [
             "BUY", "SELL", "SELL"
         ]
+
+
+def test_concurrent_sales_cannot_oversell(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import date
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from my_trading_simulator.database.models import (
+        Base,
+        PaperAccount,
+        OptionPosition,
+        TradeFill,
+    )
+    from my_trading_simulator.execution import paper_broker
+
+    # Create an isolated test database.
+    test_engine = create_engine(
+        f"sqlite:///{tmp_path / 'concurrent_sales.db'}",
+        connect_args={"timeout": 5},
+    )
+
+    Base.metadata.create_all(test_engine)
+
+    test_sessions = sessionmaker(
+        bind=test_engine,
+        class_=Session,
+        expire_on_commit=False,
+    )
+
+    monkeypatch.setattr(
+        paper_broker,
+        "SessionLocal",
+        test_sessions,
+    )
+
+    # Create an account and a position with 4 contracts.
+    with test_sessions.begin() as session:
+        account = PaperAccount(
+            name="Concurrent Sales Test",
+            initial_balance=Decimal("7000"),
+            cash_balance=Decimal("7000"),
+        )
+        session.add(account)
+        session.flush()
+
+        position = OptionPosition(
+            account_id=account.id,
+            symbol="SPY",
+            option_type="CALL",
+            strike_price=Decimal("600"),
+            expiration_date=date.today(),
+            quantity=4,
+            remaining_quantity=4,
+            entry_price=Decimal("1.00"),
+            status="OPEN",
+            profit_take_completed=False,
+            profit_take_status="PENDING",
+        )
+        session.add(position)
+        session.flush()
+
+        position_id = position.id
+        account_id = account.id
+
+    # Both workers attempt to sell 3 contracts.
+    def attempt_sale():
+        try:
+            paper_broker.sell_option(
+                position_id=position_id,
+                quantity=3,
+                fill_price=Decimal("1.50"),
+            )
+            return "SUCCESS"
+        except ValueError:
+            return "REJECTED"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: attempt_sale(),
+                range(2),
+            )
+        )
+
+    assert sorted(results) == ["REJECTED", "SUCCESS"]
+
+    # Confirm only 3 contracts were sold.
+    with test_sessions() as session:
+        position = session.get(OptionPosition, position_id)
+        account = session.get(PaperAccount, account_id)
+
+        from sqlalchemy import select
+
+        sell_fills = session.scalars(
+            select(TradeFill).where(
+                TradeFill.position_id == position_id,
+                TradeFill.side == "SELL",
+            )
+        ).all()
+
+        assert position.remaining_quantity == 1
+        assert position.status == "OPEN"
+        assert account.cash_balance == Decimal("7448.05")
+        assert len(sell_fills) == 1
+        assert sell_fills[0].quantity == 3
+
+    test_engine.dispose()
+
+
+def test_concurrent_purchases_cannot_overspend(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import date
+
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from my_trading_simulator.database.models import (
+        Base,
+        PaperAccount,
+        OptionPosition,
+        TradeFill,
+    )
+    from my_trading_simulator.execution import paper_broker
+
+    test_engine = create_engine(
+        f"sqlite:///{tmp_path / 'concurrent_buys.db'}",
+        connect_args={"timeout": 5},
+    )
+
+    Base.metadata.create_all(test_engine)
+
+    test_sessions = sessionmaker(
+        bind=test_engine,
+        class_=Session,
+        expire_on_commit=False,
+    )
+
+    monkeypatch.setattr(
+        paper_broker,
+        "SessionLocal",
+        test_sessions,
+    )
+
+    with test_sessions.begin() as session:
+        account = PaperAccount(
+            name="Concurrent Purchases Test",
+            initial_balance=Decimal("500"),
+            cash_balance=Decimal("500"),
+        )
+        session.add(account)
+        session.flush()
+        account_id = account.id
+
+    def attempt_purchase():
+        try:
+            paper_broker.buy_option(
+                account_id=account_id,
+                symbol="SPY",
+                option_type="CALL",
+                strike_price=Decimal("600"),
+                expiration_date=date.today(),
+                quantity=4,
+                fill_price=Decimal("1.00"),
+                stop_price=Decimal("0.65"),
+            )
+            return "SUCCESS"
+        except ValueError:
+            return "REJECTED"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: attempt_purchase(),
+                range(2),
+            )
+        )
+
+    assert sorted(results) == ["REJECTED", "SUCCESS"]
+
+    with test_sessions() as session:
+        account = session.get(PaperAccount, account_id)
+
+        positions = session.scalars(
+            select(OptionPosition).where(
+                OptionPosition.account_id == account_id
+            )
+        ).all()
+
+        buy_fills = session.scalars(
+            select(TradeFill).where(
+                TradeFill.side == "BUY"
+            )
+        ).all()
+
+        assert account.cash_balance == Decimal("97.40")
+        assert len(positions) == 1
+        assert len(buy_fills) == 1
+        assert buy_fills[0].quantity == 4
+
+    test_engine.dispose()

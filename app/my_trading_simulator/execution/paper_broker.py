@@ -1,6 +1,7 @@
 
 from datetime import date
 from decimal import Decimal, ROUND_FLOOR
+from sqlalchemy import select, update
 
 from sqlalchemy import select
 
@@ -82,7 +83,25 @@ def buy_option(
         if account.cash_balance < total_cost:
             raise ValueError("Insufficient available cash")
 
-        account.cash_balance -= total_cost
+        
+        # Deduct cash only when sufficient funds remain.
+        cash_result = session.execute(
+            update(PaperAccount)
+            .where(PaperAccount.id == account_id)
+            .where(PaperAccount.cash_balance >= total_cost)
+            .values(
+                cash_balance=PaperAccount.cash_balance - total_cost
+            )
+        )
+
+        if cash_result.rowcount != 1:
+            raise ValueError(
+                "Insufficient paper account cash for purchase"
+            )
+
+        # Synchronize the account object with the database.
+        session.refresh(account)
+
 
         position = OptionPosition(
             account_id=account_id,
@@ -120,12 +139,18 @@ def buy_option(
         return position.id
     
 
-def sell_option(
+
+def _sell_option_in_session(
+    session,
     position_id: int,
     quantity: int,
     fill_price: Decimal,
 ) -> Decimal:
-    """Record a simulated option sale and return realized net P&L."""
+    """
+    Record a simulated option sale using an existing session.
+
+    The caller is responsible for committing the transaction.
+    """
 
     if type(quantity) is not int or quantity <= 0:
         raise ValueError("Sell quantity must be a positive integer")
@@ -139,65 +164,119 @@ def sell_option(
     multiplier = Decimal(settings.option_contract_multiplier)
     commission_per_contract = Decimal("0.65")
 
+    position = session.scalar(
+        select(OptionPosition)
+        .where(OptionPosition.id == position_id)
+        .with_for_update()
+    )
+
+    if position is None:
+        raise ValueError("Position not found")
+
+    if position.status != "OPEN":
+        raise ValueError("Position is not open")
+
+    if quantity > position.remaining_quantity:
+        raise ValueError("Cannot sell more contracts than owned")
+
+    account = session.get(PaperAccount, position.account_id)
+
+    sale_proceeds = fill_price * quantity * multiplier
+    exit_commission = commission_per_contract * quantity
+    net_proceeds = sale_proceeds - exit_commission
+
+    # Allocate the original entry commission to sold contracts.
+    entry_commission = commission_per_contract * quantity
+
+    realized_pnl = (
+        (fill_price - position.entry_price) * quantity * multiplier
+        - entry_commission
+        - exit_commission
+    )
+
+
+    # Atomically reserve the contracts being sold.
+    result = session.execute(
+        update(OptionPosition)
+        .where(OptionPosition.id == position_id)
+        .where(OptionPosition.status == "OPEN")
+        .where(OptionPosition.remaining_quantity >= quantity)
+        .values(
+            remaining_quantity=OptionPosition.remaining_quantity - quantity
+        )
+    )
+
+    if result.rowcount != 1:
+        raise ValueError(
+            "Position changed or insufficient contracts remain"
+        )
+
+    # Refresh the position after the database update.
+    session.refresh(position)
+
+  
+    # Atomically credit the sale proceeds to the paper account.
+    cash_result = session.execute(
+        update(PaperAccount)
+        .where(PaperAccount.id == position.account_id)
+        .values(
+            cash_balance=PaperAccount.cash_balance + net_proceeds
+        )
+    )
+
+    if cash_result.rowcount != 1:
+        raise ValueError("Paper account not found")
+
+    # Refresh the account to reflect its updated balance.
+    session.refresh(account)
+
+
+    if position.remaining_quantity == 0:
+        position.status = "CLOSED"
+        position.closed_at = datetime.now(timezone.utc)
+
+
+    session.add(
+        TradeFill(
+            position_id=position.id,
+            side="SELL",
+            quantity=quantity,
+            price=fill_price,
+            commission=exit_commission,
+        )
+    )
+
+    session.add(
+        AccountTransaction(
+            account_id=account.id,
+            transaction_type="OPTION_SELL",
+            amount=net_proceeds,
+            description=(
+                f"SELL {quantity} {position.symbol} "
+                f"{position.option_type} {position.strike_price}"
+            ),
+        )
+    )
+
+    return realized_pnl
+
+
+def sell_option(
+    position_id: int,
+    quantity: int,
+    fill_price: Decimal,
+) -> Decimal:
+    """
+    Record a simulated option sale in its own transaction.
+
+    Returns realized net P&L.
+    Never submits a real brokerage order.
+    """
+
     with SessionLocal.begin() as session:
-        position = session.scalar(
-            select(OptionPosition)
-            .where(OptionPosition.id == position_id)
-            .with_for_update()
+        return _sell_option_in_session(
+            session=session,
+            position_id=position_id,
+            quantity=quantity,
+            fill_price=fill_price,
         )
-
-        if position is None:
-            raise ValueError("Position not found")
-
-        if position.status != "OPEN":
-            raise ValueError("Position is not open")
-
-        if quantity > position.remaining_quantity:
-            raise ValueError("Cannot sell more contracts than owned")
-
-        account = session.get(PaperAccount, position.account_id)
-
-        sale_proceeds = fill_price * quantity * multiplier
-        exit_commission = commission_per_contract * quantity
-        net_proceeds = sale_proceeds - exit_commission
-
-        # Allocate the original entry commission to sold contracts.
-        entry_commission = commission_per_contract * quantity
-
-        realized_pnl = (
-            (fill_price - position.entry_price) * quantity * multiplier
-            - entry_commission
-            - exit_commission
-        )
-
-        account.cash_balance += net_proceeds
-        position.remaining_quantity -= quantity
-
-        if position.remaining_quantity == 0:
-            position.status = "CLOSED"
-            position.closed_at = datetime.now(timezone.utc)
-
-        session.add(
-            TradeFill(
-                position_id=position.id,
-                side="SELL",
-                quantity=quantity,
-                price=fill_price,
-                commission=exit_commission,
-            )
-        )
-
-        session.add(
-            AccountTransaction(
-                account_id=account.id,
-                transaction_type="OPTION_SELL",
-                amount=net_proceeds,
-                description=(
-                    f"SELL {quantity} {position.symbol} "
-                    f"{position.option_type} {position.strike_price}"
-                ),
-            )
-        )
-
-        return realized_pnl
-
