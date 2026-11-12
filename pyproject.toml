@@ -9,6 +9,7 @@ description = "Paper trading simulator using Discord signals and Schwab market d
 requires-python = ">=3.11"
 dependencies = [
     "pydantic-settings>=2.16,<3",
+    "sqlalchemy>=2.0,<3",
 ]
 
 [project.optional-dependencies]
