@@ -109,3 +109,66 @@ def test_reject_excess_risk(paper_account):
     with sessions() as session:
         assert session.get(PaperAccount, account_id).cash_balance == Decimal("7000.00")
         assert session.scalars(select(OptionPosition)).first() is None
+
+
+
+def test_partial_and_full_exit(paper_account):
+    account_id, sessions = paper_account
+
+    # Buy 4 contracts at $1.00
+    position_id = paper_broker.buy_option(
+        account_id=account_id,
+        symbol="SPY",
+        option_type="CALL",
+        strike_price=Decimal("600"),
+        expiration_date=date.today(),
+        quantity=4,
+        fill_price=Decimal("1.00"),
+        stop_price=Decimal("0.65"),
+    )
+
+    # Sell 3 contracts at $1.50
+    partial_pnl = paper_broker.sell_option(
+        position_id=position_id,
+        quantity=3,
+        fill_price=Decimal("1.50"),
+    )
+
+    assert partial_pnl == Decimal("146.10")
+
+    with sessions() as session:
+        position = session.get(OptionPosition, position_id)
+        account = session.get(PaperAccount, account_id)
+
+        assert position.remaining_quantity == 1
+        assert position.status == "OPEN"
+        assert account.cash_balance == Decimal("7045.45")
+
+    # Sell remaining contract at $1.80
+    final_pnl = paper_broker.sell_option(
+        position_id=position_id,
+        quantity=1,
+        fill_price=Decimal("1.80"),
+    )
+
+    assert final_pnl == Decimal("78.70")
+
+    with sessions() as session:
+        position = session.get(OptionPosition, position_id)
+        account = session.get(PaperAccount, account_id)
+
+        assert position.remaining_quantity == 0
+        assert position.status == "CLOSED"
+        assert position.closed_at is not None
+        assert account.cash_balance == Decimal("7224.80")
+
+        fills = session.scalars(
+            select(TradeFill)
+            .where(TradeFill.position_id == position_id)
+            .order_by(TradeFill.id)
+        ).all()
+
+        assert len(fills) == 3
+        assert [fill.side for fill in fills] == [
+            "BUY", "SELL", "SELL"
+        ]

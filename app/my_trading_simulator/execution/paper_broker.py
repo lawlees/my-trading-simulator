@@ -4,6 +4,8 @@ from decimal import Decimal, ROUND_FLOOR
 
 from sqlalchemy import select
 
+from datetime import datetime, timezone
+
 from my_trading_simulator.config.settings import settings
 from my_trading_simulator.database.models import (
     AccountTransaction,
@@ -116,3 +118,86 @@ def buy_option(
         )
 
         return position.id
+    
+
+def sell_option(
+    position_id: int,
+    quantity: int,
+    fill_price: Decimal,
+) -> Decimal:
+    """Record a simulated option sale and return realized net P&L."""
+
+    if type(quantity) is not int or quantity <= 0:
+        raise ValueError("Sell quantity must be a positive integer")
+
+    if not isinstance(fill_price, Decimal) or not fill_price.is_finite():
+        raise ValueError("Fill price must be a finite Decimal")
+
+    if fill_price < 0:
+        raise ValueError("Fill price cannot be negative")
+
+    multiplier = Decimal(settings.option_contract_multiplier)
+    commission_per_contract = Decimal("0.65")
+
+    with SessionLocal.begin() as session:
+        position = session.scalar(
+            select(OptionPosition)
+            .where(OptionPosition.id == position_id)
+            .with_for_update()
+        )
+
+        if position is None:
+            raise ValueError("Position not found")
+
+        if position.status != "OPEN":
+            raise ValueError("Position is not open")
+
+        if quantity > position.remaining_quantity:
+            raise ValueError("Cannot sell more contracts than owned")
+
+        account = session.get(PaperAccount, position.account_id)
+
+        sale_proceeds = fill_price * quantity * multiplier
+        exit_commission = commission_per_contract * quantity
+        net_proceeds = sale_proceeds - exit_commission
+
+        # Allocate the original entry commission to sold contracts.
+        entry_commission = commission_per_contract * quantity
+
+        realized_pnl = (
+            (fill_price - position.entry_price) * quantity * multiplier
+            - entry_commission
+            - exit_commission
+        )
+
+        account.cash_balance += net_proceeds
+        position.remaining_quantity -= quantity
+
+        if position.remaining_quantity == 0:
+            position.status = "CLOSED"
+            position.closed_at = datetime.now(timezone.utc)
+
+        session.add(
+            TradeFill(
+                position_id=position.id,
+                side="SELL",
+                quantity=quantity,
+                price=fill_price,
+                commission=exit_commission,
+            )
+        )
+
+        session.add(
+            AccountTransaction(
+                account_id=account.id,
+                transaction_type="OPTION_SELL",
+                amount=net_proceeds,
+                description=(
+                    f"SELL {quantity} {position.symbol} "
+                    f"{position.option_type} {position.strike_price}"
+                ),
+            )
+        )
+
+        return realized_pnl
+
