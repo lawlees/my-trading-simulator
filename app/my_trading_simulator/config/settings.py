@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     max_position_allocation: Decimal = Field(default=Decimal("400"), gt=0)
     max_loss_per_trade: Decimal = Field(default=Decimal("150"), gt=0)
 
+    # Standard equity/ETF option contract multiplier
+    option_contract_multiplier: int = Field(default=100, gt=0)
+
     # Trading configuration
     options_expiration: Literal["0DTE"] = "0DTE"
     supported_symbols: tuple[str, ...] = ("SPY", "QQQ", "IWM")
