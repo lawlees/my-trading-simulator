@@ -1,6 +1,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -144,6 +145,19 @@ class OptionPosition(Base):
     )
 
 
+    trade_idea_id: Mapped[int | None] = mapped_column(
+        ForeignKey("trade_ideas.id"),
+        nullable=True,
+    )
+
+    entry_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="INITIAL",
+    )
+
+
+
 
 class TradeFill(Base):
     __tablename__ = "trade_fills"
@@ -183,4 +197,129 @@ class TradeFill(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+
+class TradeIdea(Base):
+    __tablename__ = "trade_ideas"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    account_id: Mapped[int] = mapped_column(
+        ForeignKey("paper_accounts.id"),
+        nullable=False,
+    )
+
+    symbol: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+    )
+
+    option_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+    )
+
+    size_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        default="NORMAL",
+    )
+
+    initial_allocation: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2),
+        nullable=False,
+    )
+
+    initial_risk_limit: Mapped[Decimal] = mapped_column(
+        Numeric(18, 2),
+        nullable=False,
+    )
+
+    additions_used: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="ACTIVE",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+
+class DiscordMessage(Base):
+    __tablename__ = "discord_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    discord_message_id: Mapped[str] = mapped_column(
+        String(30),
+        unique=True,
+        nullable=False,
+    )
+
+    author_id: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+
+    channel_id: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+
+    message_text: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    message_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    action: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
+    is_actionable: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+
+    trade_idea_id: Mapped[int | None] = mapped_column(
+        ForeignKey("trade_ideas.id"),
+        nullable=True,
+    )
+
+    position_id: Mapped[int | None] = mapped_column(
+        ForeignKey("option_positions.id"),
+        nullable=True,
+    )
+
+    processing_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="RECEIVED",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
     )

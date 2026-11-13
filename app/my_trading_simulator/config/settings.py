@@ -41,4 +41,12 @@ class Settings(BaseSettings):
     )
 
 
+    # Additional entry sizing
+    add_position_fraction: Decimal = Decimal("0.50")
+    max_additions_per_trade: int = 1
+
+    # Light trades use half the normal allocation and risk.
+    light_position_fraction: Decimal = Decimal("0.50")
+
+
 settings = Settings()
