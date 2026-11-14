@@ -39,3 +39,7 @@ backups/
 build/
 dist/
 *.egg-info/
+
+# Schwab OAuth credentials and tokens
+schwab_token.json
+schwab_token.json.*

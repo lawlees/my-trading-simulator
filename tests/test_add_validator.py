@@ -259,3 +259,37 @@ def test_add_after_stop_out_remains_eligible():
     assert result.is_actionable is True
     assert result.symbol == "SPY"
     assert result.option_type == OptionType.CALL
+
+
+def test_add_during_profit_taking_is_blocked():
+    """
+    ADD must be blocked while a partial exit
+    is being processed.
+    """
+    result = validate_add_signal(
+        make_add_signal(),
+        make_context_with_position(
+            profit_take_completed=False,
+            profit_take_status="CLAIMED",
+        ),
+    )
+
+    assert result.is_actionable is False
+    assert "partial profit-taking" in result.reason
+
+
+def test_add_after_profit_taking_completed_is_blocked():
+    """
+    ADD must be blocked after a partial exit,
+    even if the completed flag is inconsistent.
+    """
+    result = validate_add_signal(
+        make_add_signal(),
+        make_context_with_position(
+            profit_take_completed=False,
+            profit_take_status="COMPLETED",
+        ),
+    )
+
+    assert result.is_actionable is False
+    assert "partial profit-taking" in result.reason
