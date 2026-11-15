@@ -491,3 +491,24 @@ class IncomingNotification(Base):
         String(500),
         nullable=True,
     )
+
+class NotificationClassification(Base):
+    """Dry-run-only classification, separate from authenticated inbox and trading records."""
+
+    __tablename__ = "notification_classifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    notification_id: Mapped[int] = mapped_column(
+        ForeignKey("incoming_notifications.id"), unique=True, nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    option_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    parser_is_actionable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    execution_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    model_message_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
