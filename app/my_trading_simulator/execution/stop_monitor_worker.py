@@ -10,6 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.database.models import OptionPosition
 from my_trading_simulator.database.session import SessionLocal
 from my_trading_simulator.execution.stop_monitor import (
@@ -28,6 +29,7 @@ class MonitorCycleResult:
         return tuple(item for item in self.results if item.status == "ALERT")
 
 
+@timed("paper_stop_monitor_cycle")
 def run_monitor_cycle(
     quote_client,
     *,

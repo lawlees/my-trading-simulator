@@ -16,16 +16,22 @@ test_messages = [
 ]
 
 
-for index, message in enumerate(test_messages, start=1):
-    signal = parse_discord_message(
-        message_id=f"test-{index:03d}",
-        message_text=message,
-    )
+def main() -> None:
+    """Manual integration test only; pytest imports must not call OpenAI."""
+    for index, message in enumerate(test_messages, start=1):
+        signal = parse_discord_message(
+            message_id=f"test-{index:03d}",
+            message_text=message,
+        )
 
-    print(f"\nMessage: {message}")
-    print(f"Action: {signal.action.value}")
-    print(f"Symbol: {signal.symbol}")
-    print(f"Option type: {signal.option_type}")
-    print(f"Actionable: {signal.is_actionable}")
-    print(f"Reason: {signal.reason}")
-    print("-" * 60)
+        print(f"\nMessage: {message}")
+        print(f"Action: {signal.action.value}")
+        print(f"Symbol: {signal.symbol}")
+        print(f"Option type: {signal.option_type}")
+        print(f"Actionable: {signal.is_actionable}")
+        print(f"Reason: {signal.reason}")
+        print("-" * 60)
+
+
+if __name__ == "__main__":
+    main()

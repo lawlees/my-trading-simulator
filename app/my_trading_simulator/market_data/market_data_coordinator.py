@@ -3,6 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.config.settings import settings
 
 from my_trading_simulator.market_data.contract_selector import (
@@ -100,6 +101,7 @@ class MarketDataCoordinator:
 
         return contract
 
+    @timed("contract_selection_total")
     def select_contract(
         self,
         symbol: str,

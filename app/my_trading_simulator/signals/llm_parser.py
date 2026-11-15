@@ -1,8 +1,10 @@
 
-import os
+from functools import lru_cache
 
-from dotenv import load_dotenv
 from openai import OpenAI
+
+from my_trading_simulator.observability.performance import measure, timed
+from my_trading_simulator.secrets_manager import get_credential
 
 from my_trading_simulator.signals.models import (
     SignalAction,
@@ -14,9 +16,10 @@ from my_trading_simulator.signals.context_payload import build_context_payload
 from my_trading_simulator.signals.add_validator import validate_add_signal
 
 
-load_dotenv()
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+@lru_cache(maxsize=1)
+def get_openai_client() -> OpenAI:
+    """Create the OpenAI client only on first real classification."""
+    return OpenAI(api_key=get_credential("OPENAI_API_KEY"))
 
 
 SYSTEM_PROMPT = """
@@ -124,6 +127,7 @@ Return a TradingSignal matching the provided schema.
 """
 
 
+@timed("signal_classification_total")
 def parse_discord_message(
     message_id: str,
     message_text: str,
@@ -146,12 +150,13 @@ def parse_discord_message(
             + build_context_payload(context)
         )
 
-    response = client.responses.parse(
-        model="gpt-4.1-mini",
-        instructions=SYSTEM_PROMPT,
-        input=request_input,
-        text_format=TradingSignal,
-    )
+    with measure("openai_api_request"):
+        response = get_openai_client().responses.parse(
+            model="gpt-4.1-mini",
+            instructions=SYSTEM_PROMPT,
+            input=request_input,
+            text_format=TradingSignal,
+        )
 
     signal = response.output_parsed
 

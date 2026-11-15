@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.database.models import IncomingNotification
 from my_trading_simulator.database.session import SessionLocal
 from my_trading_simulator.ingestion.duplicate_detector import normalize_message
@@ -232,6 +233,7 @@ def is_possible_duplicate(
     "/api/v1/notifications",
     response_model=NotificationResponse,
 )
+@timed("notification_ingestion")
 def receive_notification(
     request: NotificationRequest,
     authorization: str | None = Header(default=None),

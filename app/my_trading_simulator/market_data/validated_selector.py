@@ -2,6 +2,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.config.settings import settings
 
 from my_trading_simulator.market_data.contract_selector import (
@@ -24,6 +25,7 @@ from my_trading_simulator.market_data.strike_safety import (
 )
 
 
+@timed("contract_fallback_validation")
 def find_valid_fallback_contract(
     chain: dict,
     option_type: str,
@@ -72,6 +74,7 @@ def find_valid_fallback_contract(
     return None
 
 
+@timed("contract_explicit_validation")
 def find_valid_explicit_contract(
     chain: dict,
     option_type: str,
@@ -146,6 +149,7 @@ def find_valid_explicit_contract(
     return contract
 
 
+@timed("contract_symbol_validation")
 def find_valid_contract_by_symbol(
     chain: dict,
     contract_symbol: str,

@@ -12,6 +12,7 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.database.models import (
     IncomingNotification, NotificationClassification,
 )
@@ -33,6 +34,7 @@ def is_test_message(message_text: str) -> bool:
     return bool(re.search(r"\btest\b", message_text, flags=re.IGNORECASE))
 
 
+@timed("notification_processing_total")
 def process_notification(
     notification_id: int,
     *,

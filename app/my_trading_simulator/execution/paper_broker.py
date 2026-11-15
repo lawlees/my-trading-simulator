@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.config.settings import settings
 from my_trading_simulator.database.models import (
     AccountTransaction, OptionPosition, PaperAccount, TradeFill, TradeIdea, TradeEvent,
@@ -158,6 +159,7 @@ def _validate_entry_option_symbol(
 
     return normalized
 
+@timed("paper_buy")
 def buy_option(
     account_id: int,
     symbol: str,
@@ -228,6 +230,7 @@ def buy_option(
         return position.id
 
 
+@timed("paper_add")
 def add_option(
     trade_idea_id: int,
     strike_price: Decimal,
@@ -378,6 +381,7 @@ def _sell_option_in_session(session, position_id: int, quantity: int,
     return realized_pnl
 
 
+@timed("paper_sell")
 def sell_option(position_id: int, quantity: int, fill_price: Decimal) -> Decimal:
     """Simulate an exit; may not be called with a fabricated executable price."""
     with SessionLocal.begin() as session:
@@ -396,6 +400,7 @@ def sell_option(position_id: int, quantity: int, fill_price: Decimal) -> Decimal
         return realized_pnl
 
 
+@timed("paper_stop")
 def process_option_stop(position_id: int, executable_bid: Decimal) -> bool:
     """Check a supplied VALIDATED option bid and close a triggered paper position.
 

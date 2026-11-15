@@ -17,6 +17,7 @@ from typing import Callable
 
 from dotenv import load_dotenv
 
+from my_trading_simulator.observability.performance import timed
 from my_trading_simulator.discord.discord_outbox_publisher import (
     PublishResult,
     publish_one_pending_event,
@@ -39,6 +40,7 @@ class BatchResult:
         return sum(x.status in {"FAILED", "UNKNOWN"} for x in self.outcomes)
 
 
+@timed("discord_publish_batch")
 def publish_pending_batch(
     *,
     max_events: int = 20,

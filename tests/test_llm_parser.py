@@ -30,9 +30,9 @@ def test_llm_output_passes_through_validator(monkeypatch):
         return SimpleNamespace(output_parsed=fake_signal)
 
     monkeypatch.setattr(
-        llm_parser.client.responses,
-        "parse",
-        fake_parse,
+        llm_parser,
+        "get_openai_client",
+        lambda: SimpleNamespace(responses=SimpleNamespace(parse=fake_parse)),
     )
 
     result = llm_parser.parse_discord_message(
@@ -66,9 +66,9 @@ def test_llm_ignore_cannot_be_actionable(monkeypatch):
         return SimpleNamespace(output_parsed=fake_signal)
 
     monkeypatch.setattr(
-        llm_parser.client.responses,
-        "parse",
-        fake_parse,
+        llm_parser,
+        "get_openai_client",
+        lambda: SimpleNamespace(responses=SimpleNamespace(parse=fake_parse)),
     )
 
     result = llm_parser.parse_discord_message(
@@ -118,9 +118,9 @@ def test_parser_sends_context_to_openai(monkeypatch):
         )
 
     monkeypatch.setattr(
-        llm_parser.client.responses,
-        "parse",
-        fake_parse,
+        llm_parser,
+        "get_openai_client",
+        lambda: SimpleNamespace(responses=SimpleNamespace(parse=fake_parse)),
     )
 
     signal = llm_parser.parse_discord_message(
@@ -167,9 +167,9 @@ def test_invalid_context_blocks_action(monkeypatch):
         )
 
     monkeypatch.setattr(
-        llm_parser.client.responses,
-        "parse",
-        fake_parse,
+        llm_parser,
+        "get_openai_client",
+        lambda: SimpleNamespace(responses=SimpleNamespace(parse=fake_parse)),
     )
 
     signal = llm_parser.parse_discord_message(
@@ -208,9 +208,9 @@ def test_parser_without_context_remains_compatible(monkeypatch):
         )
 
     monkeypatch.setattr(
-        llm_parser.client.responses,
-        "parse",
-        fake_parse,
+        llm_parser,
+        "get_openai_client",
+        lambda: SimpleNamespace(responses=SimpleNamespace(parse=fake_parse)),
     )
 
     signal = llm_parser.parse_discord_message(
@@ -277,9 +277,9 @@ def mock_add_response(monkeypatch):
         )
 
     monkeypatch.setattr(
-        llm_parser.client.responses,
-        "parse",
-        fake_parse,
+        llm_parser,
+        "get_openai_client",
+        lambda: SimpleNamespace(responses=SimpleNamespace(parse=fake_parse)),
     )
 
 
