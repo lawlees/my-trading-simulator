@@ -23,7 +23,8 @@ from sqlalchemy.exc import IntegrityError
 from my_trading_simulator.database.models import IncomingNotification
 from my_trading_simulator.database.session import SessionLocal
 from my_trading_simulator.ingestion.duplicate_detector import normalize_message
-
+from my_trading_simulator.api.request_limits import RequestSizeLimit
+from my_trading_simulator.api.rate_limit import RateLimitMiddleware
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
@@ -45,6 +46,16 @@ app = FastAPI(
     openapi_url=None,
 )
 
+app.add_middleware(
+    RequestSizeLimit,
+    max_bytes=8192,
+)
+
+app.add_middleware(
+    RateLimitMiddleware,
+    max_requests=30,
+    window_seconds=60,
+)
 
 class NotificationRequest(BaseModel):
     source: Literal[
