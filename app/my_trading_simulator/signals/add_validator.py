@@ -91,25 +91,3 @@ def validate_add_signal(
     return validated
 
 
-def make_context_with_position(
-    profit_take_completed=False,
-):
-    context = make_context()
-
-    position = PositionContext(
-        position_id=100,
-        symbol="SPY",
-        option_type="CALL",
-        remaining_quantity=4,
-        profit_take_completed=profit_take_completed,
-    )
-
-    return TradingContextSnapshot(
-        active_position=position,
-        active_trade_idea=context.active_trade_idea,
-        recent_messages=[],
-        open_position_count=1,
-        active_trade_idea_count=1,
-        context_is_valid=True,
-    )
-

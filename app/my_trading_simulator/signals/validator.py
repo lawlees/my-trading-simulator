@@ -1,160 +1,45 @@
+"""Deterministic validation of classified Discord signals.
 
-from datetime import date, datetime
-from decimal import Decimal
+A valid classification is NOT authorization to place a paper trade.
+"""
 
-from my_trading_simulator.market_data.contract_selector import (
-    OptionContract,
-    find_contract_by_strike,
-    find_contract_by_symbol,
-    find_contracts_by_premium,
-)
-from my_trading_simulator.market_data.quote_validator import (
-    validate_contract_for_paper_trade,
-)
-from my_trading_simulator.market_data.premium_safety import (
-    validate_contract_premium,
-)
+from my_trading_simulator.signals.models import SignalAction, TradingSignal
+
+SUPPORTED_SYMBOLS = frozenset({"SPY", "QQQ", "IWM"})
 
 
-def find_valid_fallback_contract(
-    chain: dict,
-    option_type: str,
-    trading_date: date,
-    now: datetime | None = None,
-) -> OptionContract | None:
-    """
-    Find a fallback 0DTE contract.
+def validate_signal(signal: TradingSignal) -> TradingSignal:
+    """Return a validated COPY of a TradingSignal, failing closed on ambiguity."""
+    result = signal.model_copy(deep=True)
 
-    Requirements:
-    - Correct option type
-    - Expiration matches trading date
-    - Premium passes configured fallback limits
-    - Quote is fresh
-    - Bid/ask spread is acceptable
+    if result.symbol is not None:
+        result.symbol = result.symbol.strip().upper()
+        if result.symbol not in SUPPORTED_SYMBOLS:
+            result.is_actionable = False
+            result.reason = "Unsupported underlying symbol"
+            return result
 
-    Returns None if no contract passes validation.
-    """
+    if result.action == SignalAction.IGNORE:
+        result.is_actionable = False
+        return result
 
-    candidates = find_contracts_by_premium(
-        chain=chain,
-        option_type=option_type,
-        expiration_date=trading_date,
-    )
+    if result.action == SignalAction.BUY:
+        if result.symbol is None or result.option_type is None:
+            result.is_actionable = False
+            result.reason = "BUY requires a supported symbol and CALL/PUT"
 
-    for contract in candidates:
-        premium_valid, _ = validate_contract_premium(
-            ask=contract.ask,
-            is_explicit=False,
-        )
+    elif result.action == SignalAction.ADD:
+        # ADD must also be checked against persisted trade-idea context.
+        result.is_actionable = False
+        result.reason = "ADD requires contextual and broker-level validation"
 
-        if not premium_valid:
-            continue
+    elif result.action in (SignalAction.CLOSE, SignalAction.PROFIT_TAKE):
+        if result.symbol is None:
+            result.is_actionable = False
+            result.reason = "Exit requires an unambiguous open-position symbol"
 
-        quote_valid, _ = validate_contract_for_paper_trade(
-            contract=contract,
-            trading_date=trading_date,
-            now=now,
-        )
+    else:
+        result.is_actionable = False
+        result.reason = "Unsupported signal action"
 
-        if quote_valid:
-            return contract
-
-    return None
-
-
-def find_valid_explicit_contract(
-    chain: dict,
-    option_type: str,
-    strike_price: Decimal,
-    trading_date: date,
-    now: datetime | None = None,
-) -> OptionContract | None:
-    """
-    Find Casey's exact requested strike and option type.
-
-    Requirements:
-    - Exact strike and option type
-    - Expiration matches trading date
-    - Premium passes configured explicit limits
-    - Quote is fresh
-    - Bid/ask spread is acceptable
-
-    Never substitute a different strike.
-    """
-
-    contract = find_contract_by_strike(
-        chain=chain,
-        option_type=option_type,
-        strike_price=strike_price,
-        expiration_date=trading_date,
-    )
-
-    if contract is None:
-        return None
-
-    premium_valid, _ = validate_contract_premium(
-        ask=contract.ask,
-        is_explicit=True,
-    )
-
-    if not premium_valid:
-        return None
-
-    quote_valid, _ = validate_contract_for_paper_trade(
-        contract=contract,
-        trading_date=trading_date,
-        now=now,
-    )
-
-    if not quote_valid:
-        return None
-
-    return contract
-
-
-def find_valid_contract_by_symbol(
-    chain: dict,
-    contract_symbol: str,
-    trading_date: date,
-    now: datetime | None = None,
-) -> OptionContract | None:
-    """
-    Find Casey's exact option contract by symbol.
-
-    Requirements:
-    - Exact contract symbol
-    - Expiration matches trading date
-    - Premium passes configured explicit limits
-    - Quote is fresh
-    - Bid/ask spread is acceptable
-
-    Never substitute a different contract.
-    """
-
-    contract = find_contract_by_symbol(
-        chain=chain,
-        contract_symbol=contract_symbol,
-        expiration_date=trading_date,
-    )
-
-    if contract is None:
-        return None
-
-    premium_valid, _ = validate_contract_premium(
-        ask=contract.ask,
-        is_explicit=True,
-    )
-
-    if not premium_valid:
-        return None
-
-    quote_valid, _ = validate_contract_for_paper_trade(
-        contract=contract,
-        trading_date=trading_date,
-        now=now,
-    )
-
-    if not quote_valid:
-        return None
-
-    return contract
+    return result

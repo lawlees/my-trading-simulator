@@ -50,7 +50,7 @@ def test_buy_option(paper_account):
         symbol="SPY",
         option_type="CALL",
         strike_price=Decimal("600"),
-        expiration_date=date.today(),
+        expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
         quantity=4,
         fill_price=Decimal("1.00"),
         stop_price=Decimal("0.65"),
@@ -80,7 +80,7 @@ def test_reject_excess_allocation(paper_account):
             symbol="SPY",
             option_type="CALL",
             strike_price=Decimal("600"),
-            expiration_date=date.today(),
+            expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
             quantity=5,
             fill_price=Decimal("1.00"),
             stop_price=Decimal("0.75"),
@@ -100,7 +100,7 @@ def test_reject_excess_risk(paper_account):
             symbol="SPY",
             option_type="CALL",
             strike_price=Decimal("600"),
-            expiration_date=date.today(),
+            expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
             quantity=4,
             fill_price=Decimal("1.00"),
             stop_price=Decimal("0.50"),
@@ -121,7 +121,7 @@ def test_partial_and_full_exit(paper_account):
         symbol="SPY",
         option_type="CALL",
         strike_price=Decimal("600"),
-        expiration_date=date.today(),
+        expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
         quantity=4,
         fill_price=Decimal("1.00"),
         stop_price=Decimal("0.65"),
@@ -224,7 +224,7 @@ def test_concurrent_sales_cannot_oversell(tmp_path, monkeypatch):
             symbol="SPY",
             option_type="CALL",
             strike_price=Decimal("600"),
-            expiration_date=date.today(),
+            expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
             quantity=4,
             remaining_quantity=4,
             entry_price=Decimal("1.00"),
@@ -334,7 +334,7 @@ def test_concurrent_purchases_cannot_overspend(tmp_path, monkeypatch):
                 symbol="SPY",
                 option_type="CALL",
                 strike_price=Decimal("600"),
-                expiration_date=date.today(),
+                expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
                 quantity=4,
                 fill_price=Decimal("1.00"),
                 stop_price=Decimal("0.65"),
@@ -372,5 +372,105 @@ def test_concurrent_purchases_cannot_overspend(tmp_path, monkeypatch):
         assert len(positions) == 1
         assert len(buy_fills) == 1
         assert buy_fills[0].quantity == 4
+
+    test_engine.dispose()
+
+
+def test_concurrent_buys_enforce_single_position_with_sufficient_cash(
+    tmp_path,
+    monkeypatch,
+):
+    """Two simultaneous independent BUYs must not both succeed."""
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import date
+    from threading import Barrier
+
+    from sqlalchemy import create_engine, select
+    from sqlalchemy.orm import Session, sessionmaker
+
+    from my_trading_simulator.database.models import (
+        Base,
+        PaperAccount,
+        OptionPosition,
+        TradeFill,
+    )
+    from my_trading_simulator.execution import paper_broker
+
+    test_engine = create_engine(
+        f"sqlite:///{tmp_path / 'concurrent_single_position.db'}",
+        connect_args={"timeout": 10},
+    )
+    Base.metadata.create_all(test_engine)
+
+    test_sessions = sessionmaker(
+        bind=test_engine,
+        class_=Session,
+        expire_on_commit=False,
+    )
+
+    monkeypatch.setattr(
+        paper_broker,
+        "SessionLocal",
+        test_sessions,
+    )
+
+    with test_sessions.begin() as session:
+        account = PaperAccount(
+            name="Single Position Concurrency Test",
+            initial_balance=Decimal("7000"),
+            cash_balance=Decimal("7000"),
+        )
+        session.add(account)
+        session.flush()
+        account_id = account.id
+
+    barrier = Barrier(2)
+
+    def attempt_purchase(symbol):
+        barrier.wait(timeout=10)
+
+        try:
+            paper_broker.buy_option(
+                account_id=account_id,
+                symbol=symbol,
+                option_type="CALL",
+                strike_price=Decimal("600"),
+                expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
+                quantity=4,
+                fill_price=Decimal("1.00"),
+                stop_price=Decimal("0.65"),
+            )
+            return "SUCCESS"
+        except ValueError:
+            return "REJECTED"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(attempt_purchase, "SPY"),
+            executor.submit(attempt_purchase, "QQQ"),
+        ]
+        results = [future.result() for future in futures]
+
+    assert sorted(results) == ["REJECTED", "SUCCESS"]
+
+    with test_sessions() as session:
+        positions = session.scalars(
+            select(OptionPosition).where(
+                OptionPosition.account_id == account_id,
+                OptionPosition.remaining_quantity > 0,
+            )
+        ).all()
+
+        buy_fills = session.scalars(
+            select(TradeFill).where(
+                TradeFill.side == "BUY",
+            )
+        ).all()
+
+        assert len(positions) == 1
+        assert len(buy_fills) == 1
+
+        assert positions[0].symbol in {"SPY", "QQQ"}
+        assert positions[0].remaining_quantity == 4
 
     test_engine.dispose()

@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
-
+from sqlalchemy import Text
 
 from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Boolean
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -87,6 +87,11 @@ class OptionPosition(Base):
         String(10), nullable=False
     )
 
+    option_symbol: Mapped[str | None] = mapped_column(
+    String(32),
+    nullable=True,
+)
+
     option_type: Mapped[str] = mapped_column(
         String(4), nullable=False
     )
@@ -109,6 +114,15 @@ class OptionPosition(Base):
 
     entry_price: Mapped[Decimal] = mapped_column(
         Numeric(12, 4), nullable=False
+    )
+
+    # Initial option-premium stop, persisted across restarts.
+    stop_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 4), nullable=True
+    )
+
+    close_reason: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
     )
 
     status: Mapped[str] = mapped_column(
@@ -322,4 +336,158 @@ class DiscordMessage(Base):
         DateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
+    )
+
+
+
+class TradeEvent(Base):
+    """
+    Durable trading-event and Discord notification outbox.
+
+    Trading activity is committed to SQLite first.
+    A separate publisher delivers pending events to Discord.
+
+    The publisher must never execute or repeat a trade.
+    """
+
+    __tablename__ = "trade_events"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        index=True,
+    )
+
+    account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("paper_accounts.id"),
+        nullable=True,
+        index=True,
+    )
+
+    position_id: Mapped[int | None] = mapped_column(
+        ForeignKey("option_positions.id"),
+        nullable=True,
+        index=True,
+    )
+
+    message: Mapped[str] = mapped_column(
+        String(2000),
+        nullable=False,
+    )
+
+    payload: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="{}",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    delivery_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="PENDING",
+        index=True,
+    )
+
+    delivery_attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    discord_message_id: Mapped[str | None] = mapped_column(
+        String(40),
+        nullable=True,
+    )
+
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    last_error: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    account: Mapped["PaperAccount | None"] = relationship()
+
+    position: Mapped["OptionPosition | None"] = relationship()
+
+
+class IncomingNotification(Base):
+    """
+    Stores incoming trading-related notifications.
+
+    Sources:
+      - IPHONE_NOTIFICATION
+      - MANUAL_DISCORD
+      - MANUAL_ENTRY
+
+    This is an inbox only.
+    Receiving a notification does NOT execute a trade.
+    """
+
+    __tablename__ = "incoming_notifications"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    source: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        index=True,
+    )
+
+    source_message_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    # Unique identifier assigned during ingestion.
+    # Prevents a repeated request from creating another record.
+    idempotency_key: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=False,
+    )
+
+    message_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    source_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    processing_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="RECEIVED",
+        index=True,
+    )
+
+    processing_error: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
     )

@@ -57,6 +57,42 @@ class SchwabMarketDataClient:
 
         return response.json()
 
+    
+    def get_option_quote(self, option_symbol: str) -> dict:
+        """
+        Fetch a quote for one exact option contract.
+
+        Market-data only. Never submits an order.
+
+        The returned payload must be validated for
+        contract identity, timestamp, bid and ask
+        before use by the stop monitor.
+        """
+        if not isinstance(option_symbol, str):
+            raise ValueError("Option symbol must be a string")
+
+        symbol = option_symbol.strip()
+
+        if not symbol:
+            raise ValueError("Option symbol cannot be empty")
+
+        response = self.client.get_quotes([symbol])
+        response.raise_for_status()
+
+        data = response.json()
+
+        if not isinstance(data, dict) or not data:
+            raise ValueError("Schwab returned no option quote")
+
+        if symbol not in data:
+            raise ValueError(
+                f"Schwab did not return the requested contract: {symbol}"
+            )
+
+        return data[symbol]
+
+
+    
     def get_0dte_option_chain(
         self,
         symbol: str,

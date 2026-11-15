@@ -8,7 +8,9 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from my_trading_simulator.config.settings import settings
-from my_trading_simulator.execution.paper_broker import _sell_option_in_session
+from my_trading_simulator.execution.paper_broker import (
+    _sell_option_in_session, _record_trade_event, _start_write_transaction,
+)
 from my_trading_simulator.strategy.profit_taking import calculate_profit_take_quantity
 from my_trading_simulator.strategy.stops import calculate_break_even_stop
 
@@ -27,6 +29,7 @@ def claim_profit_take(position_id: int) -> bool:
         raise ValueError("Position ID must be a positive integer")
 
     with SessionLocal.begin() as session:
+        _start_write_transaction(session)
         result = session.execute(
             update(OptionPosition)
             .where(OptionPosition.id == position_id)
@@ -57,6 +60,7 @@ def complete_profit_take(
         raise ValueError("Position ID must be a positive integer")
 
     with SessionLocal.begin() as session:
+        _start_write_transaction(session)
         position = session.scalar(
             select(OptionPosition)
             .where(OptionPosition.id == position_id)
@@ -102,4 +106,14 @@ def complete_profit_take(
         else:
             position.runner_stop_price = None
 
+        _record_trade_event(
+            session, "PROFIT_TAKEN", position,
+            f"PAPER PROFIT TAKEN: sold {quantity_to_sell} {position.symbol} "
+            f"{position.option_type} {position.strike_price} at ${fill_price} "
+            f"(position #{position.id})",
+            quantity=quantity_to_sell, fill_price=fill_price,
+            remaining_quantity=position.remaining_quantity,
+            runner_stop_price=position.runner_stop_price,
+            realized_pnl=realized_pnl,
+        )
         return realized_pnl

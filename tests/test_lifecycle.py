@@ -46,7 +46,7 @@ def test_position(tmp_path, monkeypatch):
             symbol="SPY",
             option_type="CALL",
             strike_price=Decimal("600"),
-            expiration_date=__import__("datetime").date.today(),
+            expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
             quantity=4,
             remaining_quantity=4,
             entry_price=Decimal("1.00"),
@@ -199,7 +199,16 @@ def test_end_to_end_trade_lifecycle(
     from my_trading_simulator.execution import paper_broker
     from my_trading_simulator.database.models import TradeFill
 
-    _, account_id, sessions = test_position
+    existing_position_id, account_id, sessions = test_position
+
+    # The shared fixture creates an open position for other lifecycle tests.
+    # Close it in this test's isolated SQLite database before a new INITIAL buy.
+    # Do not remove or weaken the broker's global single-position guard.
+    with sessions.begin() as session:
+        existing_position = session.get(OptionPosition, existing_position_id)
+        assert existing_position is not None
+        existing_position.status = "CLOSED"
+        existing_position.remaining_quantity = 0
 
     monkeypatch.setattr(
         paper_broker,
@@ -213,7 +222,7 @@ def test_end_to_end_trade_lifecycle(
         symbol="SPY",
         option_type="CALL",
         strike_price=Decimal("600"),
-        expiration_date=date.today(),
+        expiration_date=__import__("datetime").datetime.now(__import__("zoneinfo").ZoneInfo("America/New_York")).date(),
         quantity=4,
         fill_price=Decimal("1.00"),
         stop_price=Decimal("0.65"),
