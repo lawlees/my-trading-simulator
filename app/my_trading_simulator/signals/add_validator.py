@@ -1,4 +1,6 @@
 
+from my_trading_simulator.signals.validator import explicit_contract_error
+
 from my_trading_simulator.signals.models import (
     SignalAction,
     TradingSignal,
@@ -86,6 +88,11 @@ def validate_add_signal(
     # Resolve omitted details from the active trade idea.
     validated.symbol = idea.symbol
     validated.option_type = idea.option_type
+
+    # Resolve context first, then verify the explicit contract against it.
+    contract_error = explicit_contract_error(validated)
+    if contract_error is not None:
+        return block(contract_error)
 
     # Passing this check is not execution authorization.
     return validated

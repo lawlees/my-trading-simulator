@@ -15,8 +15,8 @@ from my_trading_simulator.market_data.contract_identity import (
     validate_contract_identity,
 )
 
-from my_trading_simulator.market_data.schwab_client import (
-    SchwabMarketDataClient,
+from my_trading_simulator.market_data.socket_client import (
+    MarketDataSocketClient,
 )
 
 from my_trading_simulator.market_data.validated_selector import (
@@ -43,6 +43,7 @@ class MarketDataCoordinator:
     and safe option contract selection.
 
     Responsibilities:
+    - Use the local read-only worker socket by default.
     - Retrieve 0DTE option chains.
     - Retrieve current underlying stock quotes.
     - Honor Casey's exact contract instructions.
@@ -58,12 +59,12 @@ class MarketDataCoordinator:
 
     def __init__(
         self,
-        market_data_client: SchwabMarketDataClient | None = None,
+        market_data_client: MarketDataSocketClient | None = None,
     ):
         self.client = (
             market_data_client
             if market_data_client is not None
-            else SchwabMarketDataClient()
+            else MarketDataSocketClient()
         )
 
     @staticmethod

@@ -1,5 +1,6 @@
 
 from enum import Enum
+from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +33,10 @@ class TradingSignal(BaseModel):
 
     # CALL or PUT when identifiable.
     option_type: OptionType | None = None
+
+    # Optional explicit Casey contract instruction (never inferred).
+    strike_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
+    contract_symbol: str | None = None
 
     # Whether the message is sufficiently clear.
     is_actionable: bool = False

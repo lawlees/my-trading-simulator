@@ -104,6 +104,13 @@ SAFETY RULES:
 18. If trading intent is ambiguous, choose IGNORE.
 19. IGNORE must always have is_actionable=False.
 20. Explain your classification briefly in the reason field.
+20a. If Casey explicitly names an option strike, return strike_price;
+     otherwise return null. Never guess a strike from chart commentary.
+20b. If Casey explicitly provides an exact OCC option symbol,
+     return contract_symbol; otherwise return null.
+20c. Never invent, synthesize, or fill an OCC symbol from context.
+20d. When a trade specifies a contract, preserve the exact instruction;
+     do not substitute a nearby strike or fallback contract.
 
 CONTEXT RULES:
 
