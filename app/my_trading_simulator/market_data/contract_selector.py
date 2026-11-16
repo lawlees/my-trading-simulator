@@ -1,7 +1,12 @@
+"""Read-only parsing/selection of Schwab option-chain contracts.
+
+Malformed individual quote entries fail closed without invalidating an otherwise
+usable chain. This module NEVER authorizes an order or a paper fill.
+"""
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 
 @dataclass(frozen=True)
@@ -17,6 +22,96 @@ class OptionContract:
     quote_timestamp_ms: int | None = None
 
 
+def _map_name(option_type: str) -> str:
+    if not isinstance(option_type, str):
+        raise ValueError("option_type must be CALL or PUT")
+    option_type = option_type.strip().upper()
+    if option_type not in {"CALL", "PUT"}:
+        raise ValueError("option_type must be CALL or PUT")
+    return "callExpDateMap" if option_type == "CALL" else "putExpDateMap"
+
+
+def _positive_decimal(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value))
+        return number if number.is_finite() and number > 0 else None
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _nonnegative_decimal(value: object) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value))
+        return number if number.is_finite() and number >= 0 else None
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _parse_contract(
+    chain: dict, option_type: str, expiration: date, strike: object, option: object
+) -> OptionContract | None:
+    if not isinstance(option, dict):
+        return None
+    strike_price = _positive_decimal(strike)
+    bid = _nonnegative_decimal(option.get("bid"))
+    ask = _positive_decimal(option.get("ask"))
+    contract_symbol = option.get("symbol")
+    underlying = chain.get("symbol")
+    if (
+        strike_price is None or bid is None or ask is None or bid > ask
+        or not isinstance(contract_symbol, str) or not contract_symbol.strip()
+        or not isinstance(underlying, str) or not underlying.strip()
+    ):
+        return None
+    raw_volume = option.get("totalVolume")
+    try:
+        volume = int(raw_volume) if raw_volume is not None else 0
+        if isinstance(raw_volume, bool) or volume < 0:
+            return None
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return OptionContract(
+        symbol=contract_symbol,
+        underlying_symbol=underlying,
+        option_type=option_type,
+        expiration_date=expiration,
+        strike_price=strike_price,
+        bid=bid,
+        ask=ask,
+        volume=volume,
+        quote_timestamp_ms=option.get("quoteTimeInLong"),
+    )
+
+
+def _iter_contracts(chain: dict, option_type: str, expiration_date: date | None):
+    map_name = _map_name(option_type)
+    if not isinstance(chain, dict):
+        return
+    expiration_map = chain.get(map_name)
+    if not isinstance(expiration_map, dict):
+        return
+    for expiration_key, strikes in expiration_map.items():
+        try:
+            actual_expiration = date.fromisoformat(str(expiration_key).split(":", 1)[0])
+        except ValueError:
+            continue
+        if expiration_date is not None and actual_expiration != expiration_date:
+            continue
+        if not isinstance(strikes, dict):
+            continue
+        for strike, options in strikes.items():
+            if not isinstance(options, list):
+                continue
+            for option in options:
+                contract = _parse_contract(chain, option_type, actual_expiration, strike, option)
+                if contract is not None:
+                    yield contract
+
+
 def find_contracts_by_premium(
     chain: dict,
     option_type: str,
@@ -24,256 +119,54 @@ def find_contracts_by_premium(
     target_max: Decimal = Decimal("0.50"),
     expiration_date: date | None = None,
 ) -> list[OptionContract]:
-    """
-    Find option contracts within a target ask range.
-
-    If expiration_date is provided, only contracts
-    expiring on that exact date are returned.
-
-    This function does not authorize trades.
-    Quote freshness and liquidity must be
-    validated separately.
-    """
-
-    option_type = option_type.strip().upper()
-
-    if option_type not in {"CALL", "PUT"}:
-        raise ValueError(
-            "option_type must be CALL or PUT"
-        )
-
-    if target_min <= 0 or target_max < target_min:
+    """Find fallback contracts within the price band; no execution authority."""
+    _map_name(option_type)
+    if (
+        not isinstance(target_min, Decimal)
+        or not isinstance(target_max, Decimal)
+        or not target_min.is_finite()
+        or not target_max.is_finite()
+        or target_min <= 0 or target_max < target_min
+    ):
         raise ValueError("Invalid premium range")
 
-    map_name = (
-        "callExpDateMap"
-        if option_type == "CALL"
-        else "putExpDateMap"
-    )
-
-    matches = []
-
-    for expiration_key, strikes in chain.get(
-        map_name, {}
-    ).items():
-
-        contract_expiration = date.fromisoformat(
-            expiration_key.split(":")[0]
-        )
-
-        # Only select contracts for the requested date
-        if (
-            expiration_date is not None
-            and contract_expiration != expiration_date
-        ):
-            continue
-
-        for strike, contracts in strikes.items():
-            for option in contracts:
-
-                bid_value = option.get("bid")
-                ask_value = option.get("ask")
-
-                if bid_value is None or ask_value is None:
-                    continue
-
-                bid = Decimal(str(bid_value))
-                ask = Decimal(str(ask_value))
-
-                # Reject invalid bid/ask quotes
-                if bid < 0 or ask <= 0 or bid > ask:
-                    continue
-
-                # Apply preferred premium range
-                if not target_min <= ask <= target_max:
-                    continue
-
-                matches.append(
-                    OptionContract(
-                        symbol=option["symbol"],
-                        underlying_symbol=chain["symbol"],
-                        option_type=option_type,
-                        expiration_date=contract_expiration,
-                        strike_price=Decimal(str(strike)),
-                        bid=bid,
-                        ask=ask,
-                        volume=int(
-                            option.get("totalVolume") or 0
-                        ),
-                        quote_timestamp_ms=option.get("quoteTimeInLong"),
-                    )
-                )
-
-    # Prefer contracts closest to $0.45,
-    # then those with tighter bid/ask spreads.
+    matches = [
+        contract for contract in _iter_contracts(chain, option_type.strip().upper(), expiration_date)
+        if target_min <= contract.ask <= target_max
+    ]
     return sorted(
         matches,
         key=lambda contract: (
-            abs(
-                contract.ask - Decimal("0.45")
-            ),
+            abs(contract.ask - Decimal("0.45")),
             contract.ask - contract.bid,
         ),
     )
 
 
 def find_contract_by_strike(
-    chain: dict,
-    option_type: str,
-    strike_price: Decimal,
-    expiration_date: date,
+    chain: dict, option_type: str, strike_price: Decimal, expiration_date: date
 ) -> OptionContract | None:
-    """
-    Find the exact contract requested by Casey.
-
-    Does not apply the preferred premium range.
-    Returns None if the contract is unavailable.
-
-    Quote freshness and liquidity must be
-    validated separately.
-    """
-
-    option_type = option_type.strip().upper()
-
-    if option_type not in {"CALL", "PUT"}:
-        raise ValueError(
-            "option_type must be CALL or PUT"
-        )
-
-    map_name = (
-        "callExpDateMap"
-        if option_type == "CALL"
-        else "putExpDateMap"
-    )
-
-    for expiration_key, strikes in chain.get(
-        map_name, {}
-    ).items():
-
-        actual_expiration = date.fromisoformat(
-            expiration_key.split(":")[0]
-        )
-
-        if actual_expiration != expiration_date:
-            continue
-
-        for strike, contracts in strikes.items():
-
-            if Decimal(str(strike)) != strike_price:
-                continue
-
-            for option in contracts:
-
-                bid_value = option.get("bid")
-                ask_value = option.get("ask")
-
-                if bid_value is None or ask_value is None:
-                    continue
-
-                bid = Decimal(str(bid_value))
-                ask = Decimal(str(ask_value))
-
-                # Reject invalid bid/ask quotes
-                if bid < 0 or ask <= 0 or bid > ask:
-                    continue
-
-                return OptionContract(
-                    symbol=option["symbol"],
-                    underlying_symbol=chain["symbol"],
-                    option_type=option_type,
-                    expiration_date=actual_expiration,
-                    strike_price=Decimal(str(strike)),
-                    bid=bid,
-                    ask=ask,
-                    volume=int(
-                        option.get("totalVolume") or 0
-                    ),
-                    quote_timestamp_ms=option.get("quoteTimeInLong"),
-                )
-
+    """Find an exact strike and expiration; never substitute another strike."""
+    _map_name(option_type)
+    if not isinstance(strike_price, Decimal) or not strike_price.is_finite():
+        return None
+    for contract in _iter_contracts(chain, option_type.strip().upper(), expiration_date):
+        if contract.strike_price == strike_price:
+            return contract
     return None
 
 
 def find_contract_by_symbol(
-    chain: dict,
-    contract_symbol: str,
-    expiration_date: date,
+    chain: dict, contract_symbol: str, expiration_date: date
 ) -> OptionContract | None:
-    """
-    Find the exact option contract by its full symbol.
-
-    Handles differences in whitespace, including
-    Schwab's padded option symbols.
-
-    Does not substitute a different contract.
-    Does not apply the preferred premium range.
-
-    Quote freshness and liquidity must be
-    validated separately.
-    """
-
-    # Normalize whitespace without changing
-    # the contract's actual identity.
-    requested_symbol = "".join(
-        contract_symbol.upper().split()
-    )
-
-    if not requested_symbol:
+    """Match the complete normalized Schwab contract symbol exactly."""
+    if not isinstance(contract_symbol, str):
         return None
-
-    for option_type, map_name in (
-        ("CALL", "callExpDateMap"),
-        ("PUT", "putExpDateMap"),
-    ):
-        for expiration_key, strikes in chain.get(
-            map_name, {}
-        ).items():
-
-            actual_expiration = date.fromisoformat(
-                expiration_key.split(":")[0]
-            )
-
-            if actual_expiration != expiration_date:
-                continue
-
-            for strike, contracts in strikes.items():
-                for option in contracts:
-
-                    actual_symbol = "".join(
-                        str(option.get("symbol", ""))
-                        .upper()
-                        .split()
-                    )
-
-                    if actual_symbol != requested_symbol:
-                        continue
-
-                    bid_value = option.get("bid")
-                    ask_value = option.get("ask")
-
-                    if bid_value is None or ask_value is None:
-                        return None
-
-                    bid = Decimal(str(bid_value))
-                    ask = Decimal(str(ask_value))
-
-                    if bid < 0 or ask <= 0 or bid > ask:
-                        return None
-
-                    return OptionContract(
-                        symbol=option["symbol"],
-                        underlying_symbol=chain["symbol"],
-                        option_type=option_type,
-                        expiration_date=actual_expiration,
-                        strike_price=Decimal(str(strike)),
-                        bid=bid,
-                        ask=ask,
-                        volume=int(
-                            option.get("totalVolume") or 0
-                        ),
-                        quote_timestamp_ms=option.get(
-                            "quoteTimeInLong"
-                        ),
-                    )
-
+    requested = "".join(contract_symbol.upper().split())
+    if not requested:
+        return None
+    for option_type in ("CALL", "PUT"):
+        for contract in _iter_contracts(chain, option_type, expiration_date):
+            if "".join(contract.symbol.upper().split()) == requested:
+                return contract
     return None

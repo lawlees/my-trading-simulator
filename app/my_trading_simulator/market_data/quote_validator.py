@@ -25,16 +25,16 @@ def validate_option_quote(
     if now is None:
         now = datetime.now(timezone.utc)
 
-    if now.tzinfo is None:
+    if now.tzinfo is None or now.utcoffset() is None:
         return False, "Current time must be timezone-aware"
 
     if contract.expiration_date != trading_date:
         return False, "Contract is not 0DTE"
 
-    if contract.bid < 0:
+    if not isinstance(contract.bid, Decimal) or not contract.bid.is_finite() or contract.bid <= 0:
         return False, "Invalid bid price"
 
-    if contract.ask <= 0:
+    if not isinstance(contract.ask, Decimal) or not contract.ask.is_finite() or contract.ask <= 0:
         return False, "Invalid ask price"
 
     if contract.bid > contract.ask:

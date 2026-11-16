@@ -99,7 +99,10 @@ def get_credential(name: str) -> str:
             f"Unsupported credential: {name}"
         )
 
-    load_dotenv(override=False)
+    # Explicit AWS mode must not probe an inaccessible cwd for .env files.
+    # Preserve .env discovery for local developer mode and implicit sources.
+    if os.getenv("MY_TRADING_SIMULATOR_CREDENTIAL_SOURCE", "").strip().lower() != "aws":
+        load_dotenv(override=False)
 
     source = os.getenv(
         "MY_TRADING_SIMULATOR_CREDENTIAL_SOURCE",
