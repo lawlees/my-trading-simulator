@@ -1,0 +1,35 @@
+[Unit]
+Description=Isolated read-only Schwab market-data Unix socket worker
+After=network-online.target
+Wants=network-online.target
+ConditionPathIsDirectory=/run/my-trading-simulator-market-data
+
+[Service]
+Type=simple
+User=schwab-worker
+Group=schwab-worker
+SupplementaryGroups=trading-market-data
+WorkingDirectory=/var/tmp
+Environment=HOME=/var/lib/schwab-worker
+Environment=AWS_CONFIG_FILE=/var/lib/schwab-worker/.aws/config
+Environment=PYTHONPATH=/opt/my-trading-simulator-schwab/app
+Environment=MY_TRADING_SIMULATOR_CREDENTIAL_SOURCE=aws
+Environment=MY_TRADING_SIMULATOR_AWS_PROFILE=my-trading-simulator-schwab
+Environment=AWS_PROFILE=my-trading-simulator-schwab
+ExecStartPre=/opt/my-trading-simulator-schwab/.venv/bin/python -m my_trading_simulator.market_data.socket_service --check-config
+ExecStart=/opt/my-trading-simulator-schwab/.venv/bin/python -m my_trading_simulator.market_data.socket_service --serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/schwab-worker /run/my-trading-simulator-market-data
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
