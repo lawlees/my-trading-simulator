@@ -77,3 +77,45 @@ def test_lock_released_explicitly(tmp_path):
 
     with SchwabWorkerLock(lock_path):
         pass
+
+
+def _attempt_lock_in_child(lock_path, result_queue):
+    """Try acquiring the lock in a separate process."""
+    try:
+        with SchwabWorkerLock(lock_path):
+            result_queue.put("ACQUIRED")
+    except RuntimeError as error:
+        result_queue.put(str(error))
+
+
+def test_lock_rejects_another_process(tmp_path):
+    """A separate process cannot acquire an active lock."""
+    context = multiprocessing.get_context("spawn")
+
+    lock_path = tmp_path / "schwab.lock"
+    result_queue = context.Queue()
+
+    with SchwabWorkerLock(lock_path):
+        process = context.Process(
+            target=_attempt_lock_in_child,
+            args=(str(lock_path), result_queue),
+        )
+        process.start()
+
+        try:
+            result = result_queue.get(timeout=10)
+            assert (
+                result
+                == "Another Schwab worker is already running"
+            )
+        finally:
+            process.join(timeout=10)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+
+        assert process.exitcode == 0
+
+    # The lock must become available after release.
+    with SchwabWorkerLock(lock_path):
+        pass

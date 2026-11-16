@@ -22,7 +22,7 @@ from my_trading_simulator.market_data.schwab_worker_lock import (
 
 
 DEFAULT_LOCK_PATH = Path(
-    "/var/lib/schwab-worker/schwab-oauth.lock"
+    "/var/lib/schwab-worker/schwab-market-data.lock"
 )
 
 T = TypeVar("T")
