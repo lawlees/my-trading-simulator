@@ -34,8 +34,7 @@ def test_shutdown_after_multiple_readonly_requests(tmp_path):
         assert path.exists()
         client = MarketDataSocketClient(socket_path=str(path))
 
-        # bind() creates the socket path before listen() completes.
-        # Retry only the initial connection while the server starts.
+        # The socket path can appear before listen() starts accepting.
         from my_trading_simulator.market_data.socket_client import (
             MarketDataSocketError,
         )

@@ -103,6 +103,8 @@ def process_notification(
                 action=signal.action.value,
                 symbol=signal.symbol,
                 option_type=(signal.option_type.value if signal.option_type else None),
+                strike_price=signal.strike_price,
+                contract_symbol=signal.contract_symbol,
                 parser_is_actionable=signal.is_actionable,
                 execution_allowed=False,
                 reason=signal.reason,

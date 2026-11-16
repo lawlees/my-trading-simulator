@@ -504,6 +504,9 @@ class NotificationClassification(Base):
     action: Mapped[str] = mapped_column(String(30), nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(10), nullable=True)
     option_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # Casey's explicit instruction; NULL means no explicit contract supplied.
+    strike_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    contract_symbol: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parser_is_actionable: Mapped[bool] = mapped_column(Boolean, nullable=False)
     execution_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
