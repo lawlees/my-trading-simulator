@@ -515,3 +515,22 @@ class NotificationClassification(Base):
         DateTime(timezone=True), nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+
+
+class ClassificationTradeReview(Base):
+    """Historical, never executable classification-to-idea review snapshot."""
+
+    __tablename__ = "classification_trade_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    classification_id: Mapped[int] = mapped_column(
+        ForeignKey("notification_classifications.id"), unique=True, nullable=False, index=True,
+    )
+    account_id: Mapped[int] = mapped_column(ForeignKey("paper_accounts.id"), nullable=False)
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    trade_idea_id: Mapped[int | None] = mapped_column(ForeignKey("trade_ideas.id"), nullable=True)
+    position_id: Mapped[int | None] = mapped_column(ForeignKey("option_positions.id"), nullable=True)
+    execution_allowed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
