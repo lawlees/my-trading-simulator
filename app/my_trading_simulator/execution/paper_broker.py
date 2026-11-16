@@ -206,6 +206,16 @@ def buy_option(
             raise ValueError("Paper account not found")
         if _account_has_open_position(session, account_id):
             raise ValueError("Another option position remains open")
+        # An ACTIVE idea may have no position after a stop. It is still
+        # reserved for Casey's one permitted linked ADD, not a fresh BUY.
+        active_idea_id = session.scalar(
+            select(TradeIdea.id).where(
+                TradeIdea.account_id == account_id,
+                TradeIdea.status == "ACTIVE",
+            ).limit(1)
+        )
+        if active_idea_id is not None:
+            raise ValueError("An active trade idea already exists")
         _debit_cash(session, account_id, premium + commission)
 
         idea = TradeIdea(
